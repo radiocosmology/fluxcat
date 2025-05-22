@@ -3,6 +3,12 @@
 This module contains tools for cataloging astronomical sources
 and predicting their flux density at radio frequencies based on
 previous measurements.
+
+Classes
+-------
+- :py:class:`CurvedPowerLaw`
+- :py:class:`FitSpectrum`
+- :py:class:`FluxCatalog`
 """
 
 import base64
@@ -18,10 +24,11 @@ from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 
 import numpy as np
-from caput import misc
 from caput import time as ctime
 
 from . import catalogs
+
+__all__ = ["CurvedPowerLaw", "FitSpectrum", "FluxCatalog"]
 
 # Define nominal frequency. Sources in catalog are ordered according to
 # their predicted flux density at this frequency. Also acts as default
@@ -270,6 +277,14 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
     to individual sources.  All instances are stored in an
     internal class dictionary.
 
+    Any class deriving from `FluxCatalog` can include a list of
+    default catalogs to load by implementing the `DEFAULT_COLLECTIONS`
+    attribute at the module level. Catalogs listed in this way
+    are loaded lazily the first time the class tries to access
+    any loaded catalog information. Default collections are only
+    checked in the same module as the derived class - they are
+    _not_ inherited when importing `fluxcat`.
+
     Attributes
     ----------
     fields : list
@@ -359,21 +374,25 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
             - 2 - Overwrite the existing entry.
             Default is 0.
         """
+        # Load the default collections, if they have not
+        # already been loaded
+        self._load_defaults()
+
         # The name argument is a unique identifier into the catalog.
         # Check if there is already a source in the catalog with the
         # input name.  If there is, then the behavior is set by the
         # overwrite argument.
-        if (overwrite < 2) and (name in FluxCatalog):
+        if (overwrite < 2) and (name in self.__class__):
             # Return existing entry
             print(f"{name} already has an entry in catalog.", end=" ")
             if overwrite == 0:
                 print("Returning existing entry.")
-                self = FluxCatalog[name]
+                self = self.__class__[name]
 
             # Add any measurements to existing entry
             elif overwrite == 1:
                 print("Adding measurements to existing entry.")
-                self = FluxCatalog[name]
+                self = self.__class__[name]
                 if measurements is not None:
                     self.add_measurement(*measurements)
                     self.fit_model()
@@ -412,7 +431,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
             )
 
             # Populate the kwargs that were used
-            arg_list = misc.getfullargspec(self.model_lookup[self.model].__init__)
+            arg_list = inspect.getfullargspec(self.model_lookup[self.model].__init__)
             if len(arg_list.args) > 1:
                 keys = arg_list.args[1:]
                 for key in keys:
@@ -514,7 +533,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
         spectral model specified in the 'model' attribute. This populates the
         'param', 'param_cov', and 'stats' attributes.
         """
-        arg_list = misc.getfullargspec(self._model.fit).args[1:]
+        arg_list = inspect.getfullargspec(self._model.fit).args[1:]
 
         args = [self.freq[self.flag], self.flux[self.flag], self.eflux[self.flag]]
 
@@ -687,7 +706,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
             Flux density in Jansky.
 
         """
-        arg_list = misc.getfullargspec(self._model.predict).args[1:]
+        arg_list = inspect.getfullargspec(self._model.predict).args[1:]
 
         if (epoch is not None) and ("epoch" in arg_list):
             args = [freq, epoch]
@@ -714,7 +733,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
             Uncertainty on the flux density in Jansky.
 
         """
-        arg_list = misc.getfullargspec(self._model.uncertainty).args[1:]
+        arg_list = inspect.getfullargspec(self._model.uncertainty).args[1:]
 
         if (epoch is not None) and ("epoch" in arg_list):
             args = [freq, epoch]
@@ -874,6 +893,27 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
     # Class methods that act on the entire catalog
     # =============================================================
 
+    def _load_defaults_on_call(func, *args, **kwargs):
+        """Decorator to load defaults, if they have not been loaded."""
+
+        def inner(cls, *args, **kwargs):
+            module = inspect.getmodule(cls)
+            if not getattr(module, "__defaults_loaded", False):
+                setattr(module, "__defaults_loaded", True)
+                # Overwrite class-level dicts
+                cls._entries = {}
+                cls._collections = {}
+                cls._alternate_name_lookup = {}
+                for col in _ensure_list(getattr(module, "DEFAULT_COLLECTIONS", [])):
+                    cls.load_dict(catalogs.load(col), col)
+            return func(cls, *args, **kwargs)
+
+        return inner
+
+    @classmethod
+    @_load_defaults_on_call
+    def _load_defaults(cls): ...
+
     @classmethod
     def string(cls):
         """Print basic information about the sources in the catalog."""
@@ -923,7 +963,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
             plot flux measurements, etc.
 
         """
-        arg_list = misc.getfullargspec(cls.__init__).args[2:]
+        arg_list = inspect.getfullargspec(cls.__init__).args[2:]
 
         kwargs = {
             field: flux_body_dict[field]
@@ -934,6 +974,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
         return cls(name, **kwargs)
 
     @classmethod
+    @_load_defaults_on_call
     def get(cls, key):
         """Searches the catalog for a source.  First checks against the
         'name' of each entry, then checks against the 'alternate_names'
@@ -999,6 +1040,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
             del obj
 
     @classmethod
+    @_load_defaults_on_call
     def sort(cls):
         """Sorts the entries in the catalog by their flux density
         at FREQ_NOMINAL in descending order.
@@ -1071,6 +1113,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
         return iter([(key, cls._entries[key]) for key in cls.sort()])
 
     @classmethod
+    @_load_defaults_on_call
     def len(cls):
         """Number of sources in the catalog.
 
@@ -1132,6 +1175,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
             _print_collection_summary(*cc, verbose=verbose)
 
     @classmethod
+    @_load_defaults_on_call
     def loaded_collections(cls):
         """Return the collections that have been loaded.
 
@@ -1145,6 +1189,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
         return list(cls._collections.items())
 
     @classmethod
+    @_load_defaults_on_call
     def print_loaded_collections(cls, verbose=False):
         """Print information about the collection that have been loaded.
 
@@ -1158,6 +1203,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
             _print_collection_summary(cat, sources, verbose=verbose)
 
     @classmethod
+    @_load_defaults_on_call
     def delete_loaded_collection(cls, cat):
         sources_to_delete = cls._collections.pop(cat)
 
@@ -1249,6 +1295,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
         )
 
     @classmethod
+    @_load_defaults_on_call
     def load_dict(
         cls,
         collection_dict,
@@ -1503,8 +1550,3 @@ def _ensure_list(obj, num=None):
             obj = [obj]
 
     return obj
-
-
-# Load the default collections
-for col in DEFAULT_COLLECTIONS:
-    FluxCatalog.load_dict(catalogs.load(col), col)
