@@ -10,7 +10,6 @@ Functions
 import glob
 import json
 import pathlib
-
 from collections.abc import Iterable
 
 
