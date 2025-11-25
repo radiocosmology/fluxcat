@@ -30,8 +30,8 @@ __all__ = ["FluxCatalog", "__version__", "catalogs"]
 
 from importlib.metadata import PackageNotFoundError, version
 
-from .core import FluxCatalog as FluxCatalog
 from . import catalogs as catalogs
+from .core import FluxCatalog as FluxCatalog
 
 try:
     __version__ = version("fluxcat")
