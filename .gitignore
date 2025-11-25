@@ -9,9 +9,6 @@
 *.c
 *.cpp
 
-# Data files
-caput/data/
-
 # Packages
 *.egg
 *.egg-info
