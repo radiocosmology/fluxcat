@@ -24,7 +24,7 @@ from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 
 import numpy as np
-from caput import time as ctime
+from caput.astro.skyfield import skyfield_star_from_ra_dec
 
 from . import catalogs
 
@@ -672,7 +672,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
         # Create block with statistics
         if not residuals:
             txt = (
-                r"$\chi^2" + f' = {self.stats["chisq"]:0.2f}$ $({self.stats["ndof"]})$'
+                r"$\chi^2" + f" = {self.stats['chisq']:0.2f}$ $({self.stats['ndof']})$"
             )
 
             plt.text(
@@ -836,7 +836,7 @@ class FluxCatalog(metaclass=MetaFluxCatalog):
         """Skyfield star representation :class:`skyfield.starlib.Star`
         for the source.
         """
-        return ctime.skyfield_star_from_ra_dec(self.ra, self.dec, self.name)
+        return skyfield_star_from_ra_dec(self.ra, self.dec, self.name)
 
     @property
     def freq(self):
